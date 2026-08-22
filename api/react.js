@@ -15,39 +15,57 @@ import {
 
 const BASE_LIMIT = 10;
 
+/*
+ * Response text khusus endpoint reaction.
+ * Frontend akan menerima teks langsung,
+ * bukan object JSON.
+ */
+function sendText(res, message, status = 200) {
+  res.statusCode = status;
+
+  res.setHeader(
+    "content-type",
+    "text/plain; charset=utf-8"
+  );
+
+  res.setHeader(
+    "cache-control",
+    "no-store, no-cache, must-revalidate"
+  );
+
+  res.end(String(message));
+}
+
 export default async function handler(req, res) {
   try {
-    // ==============================
+    // ==========================================
     // METHOD
-    // ==============================
+    // ==========================================
+
     if (req.method !== "POST") {
-      return sendJson(
+      return sendText(
         res,
-        {
-          ok: false,
-          message: "Method tidak valid.",
-        },
+        "❌ Method tidak valid.",
         405
       );
     }
 
-    // ==============================
+    // ==========================================
     // SAME ORIGIN
-    // ==============================
+    // ==========================================
+
     if (!sameOrigin(req)) {
-      return sendJson(
+      return sendText(
         res,
-        {
-          ok: false,
-          message: "Origin tidak diizinkan.",
-        },
+        "❌ Origin tidak diizinkan.",
         403
       );
     }
 
-    // ==============================
+    // ==========================================
     // REQUEST BODY
-    // ==============================
+    // ==========================================
+
     const b = await body(req);
 
     const targetUrl = String(
@@ -58,37 +76,37 @@ export default async function handler(req, res) {
       b?.reaction || ""
     ).trim();
 
-    // ==============================
-    // NORMALIZE TARGET + REACTION
-    // ==============================
+    // ==========================================
+    // NORMALIZE
+    // ==========================================
+
     const parsed = normalize(
       targetUrl,
       rawReaction
     );
 
     if (parsed?.error) {
-      return sendJson(
+      return sendText(
         res,
-        {
-          ok: false,
-          message: parsed.error,
-        },
+        `❌ ${parsed.error}`,
         400
       );
     }
 
-    // ==============================
-    // CHECK ADMIN SESSION
-    // ==============================
+    // ==========================================
+    // ADMIN CHECK
+    // ==========================================
+
     const adminResult =
       await requireAdmin(req);
 
     const isAdmin =
       adminResult?.ok === true;
 
-    // ==============================
-    // IDENTIFY USER
-    // ==============================
+    // ==========================================
+    // IDENTITAS USER
+    // ==========================================
+
     const clientIp =
       getClientIp(req);
 
@@ -99,9 +117,10 @@ export default async function handler(req, res) {
       .toISOString()
       .slice(0, 10);
 
-    // ==============================
+    // ==========================================
     // BONUS LIMIT
-    // ==============================
+    // ==========================================
+
     let bonus = 0;
 
     try {
@@ -125,17 +144,16 @@ export default async function handler(req, res) {
         error
       );
 
-      // Jangan membuat request gagal
-      // hanya karena bonus gagal dibaca.
       bonus = 0;
     }
 
     const limit =
       BASE_LIMIT + bonus;
 
-    // ==============================
-    // CREATE / UPDATE DAILY USAGE
-    // ==============================
+    // ==========================================
+    // INIT USAGE
+    // ==========================================
+
     try {
       await sql`
         INSERT INTO usage_daily(
@@ -163,21 +181,17 @@ export default async function handler(req, res) {
         error
       );
 
-      return sendJson(
+      return sendText(
         res,
-        {
-          ok: false,
-          message:
-            "Gagal mengakses data penggunaan.",
-        },
+        "❌ Gagal mengakses data penggunaan.",
         500
       );
     }
 
-    // ==============================
-    // CONSUME QUOTA
-    // ADMIN = UNLIMITED
-    // ==============================
+    // ==========================================
+    // CLAIM QUOTA
+    // ==========================================
+
     if (!isAdmin) {
       let claimed;
 
@@ -201,13 +215,9 @@ export default async function handler(req, res) {
           error
         );
 
-        return sendJson(
+        return sendText(
           res,
-          {
-            ok: false,
-            message:
-              "Gagal memeriksa limit harian.",
-          },
+          "❌ Gagal memeriksa limit harian.",
           500
         );
       }
@@ -216,21 +226,18 @@ export default async function handler(req, res) {
         !claimed ||
         claimed.length === 0
       ) {
-        return sendJson(
+        return sendText(
           res,
-          {
-            ok: false,
-            message:
-              "Limit harian kamu sudah habis.\nBalik lagi besok ya — limit direset otomatis setiap hari!",
-          },
+          "❌ Limit harian kamu sudah habis.\n\nBalik lagi besok ya — limit direset otomatis setiap hari!",
           429
         );
       }
     }
 
-    // ==============================
+    // ==========================================
     // SEND REACTIONS
-    // ==============================
+    // ==========================================
+
     const results = [];
 
     for (
@@ -266,9 +273,10 @@ export default async function handler(req, res) {
       }
     }
 
-    // ==============================
-    // RESULT
-    // ==============================
+    // ==========================================
+    // FILTER RESULT
+    // ==========================================
+
     const successResults =
       results.filter(
         (item) =>
@@ -281,89 +289,72 @@ export default async function handler(req, res) {
           item?.ok !== true
       );
 
-    // ==============================
-    // ALL SUCCESS
-    // ==============================
+    // ==========================================
+    // SEMUA BERHASIL
+    // ==========================================
+
     if (
       successResults.length ===
       results.length
     ) {
       if (results.length === 1) {
-        return sendJson(
+        return sendText(
           res,
-          {
-            ok: true,
-            message:
-              "✅ Reaction berhasil!\n\nLihat postingan channel anda 🫡",
-          },
+          "✅ Reaction berhasil!\n\nLihat postingan channel anda 🫡",
           200
         );
       }
 
-      return sendJson(
+      return sendText(
         res,
-        {
-          ok: true,
-          message:
-            `✅ Semua ${results.length} reaction berhasil!\n\n` +
-            `${successResults
-              .map(
-                (item) =>
-                  item.emoji
-              )
-              .join("  ")}\n\n` +
-            "Lihat postingan channel anda 🫡",
-        },
+        `✅ Semua ${results.length} reaction berhasil!\n\n${successResults
+          .map(
+            (item) =>
+              item.emoji
+          )
+          .join("  ")}\n\nLihat postingan channel anda 🫡`,
         200
       );
     }
 
-    // ==============================
-    // ALL FAILED
-    // ==============================
+    // ==========================================
+    // SEMUA GAGAL
+    // ==========================================
+
     if (
       successResults.length === 0
     ) {
-      return sendJson(
+      return sendText(
         res,
-        {
-          ok: false,
-          message:
-            `❌ Semua reaction gagal!\n\n` +
-            `${failedResults
-              .map(
-                (item) =>
-                  `${item.emoji} (${item.message || "Gagal diproses."})`
-              )
-              .join("\n")}`,
-        },
+        `❌ Semua reaction gagal!\n\n${failedResults
+          .map(
+            (item) =>
+              `${item.emoji} (${item.message || "Gagal diproses."})`
+          )
+          .join("\n")}`,
         400
       );
     }
 
-    // ==============================
+    // ==========================================
     // PARTIAL SUCCESS
-    // ==============================
-    return sendJson(
+    // ==========================================
+
+    return sendText(
       res,
-      {
-        ok: false,
-        partial: true,
-        message:
-          `⚠️ ${successResults.length} dari ${results.length} reaction berhasil.\n\n` +
-          `✅ Berhasil: ${successResults
-            .map(
-              (item) =>
-                item.emoji
-            )
-            .join("  ")}\n` +
-          `❌ Gagal:\n${failedResults
-            .map(
-              (item) =>
-                `${item.emoji} (${item.message || "Gagal diproses."})`
-            )
-            .join("\n")}`,
-      },
+      `⚠️ ${successResults.length} dari ${results.length} reaction berhasil.\n\n` +
+        `✅ Berhasil: ${successResults
+          .map(
+            (item) =>
+              item.emoji
+          )
+          .join("  ")}\n` +
+        `❌ Gagal:\n${failedResults
+          .map(
+            (item) =>
+              `${item.emoji} (${item.message || "Gagal diproses."})`
+          )
+          .join("\n")}`,
       207
     );
   } catch (error) {
@@ -372,13 +363,9 @@ export default async function handler(req, res) {
       error
     );
 
-    return sendJson(
+    return sendText(
       res,
-      {
-        ok: false,
-        message:
-          "Terjadi kesalahan pada server.",
-      },
+      "❌ Terjadi kesalahan pada server.",
       500
     );
   }
