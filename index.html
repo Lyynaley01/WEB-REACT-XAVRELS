@@ -1137,425 +1137,1631 @@
         Simple • Fast • Easy to use
     </footer>
 
-    <script>
-        /* ── Alert helpers ── */
-        function showAlert(el, type, text) {
-            const icons = { success: 'fa-check-circle', error: 'fa-exclamation-circle', warning: 'fa-triangle-exclamation',
-                info: 'fa-circle-notch fa-spin' };
-            el.className = 'alert show ' + type;
-            el.innerHTML =
-                '<div class="alert-stripe"></div>' +
-                '<div class="alert-inner">' +
-                '<i class="alert-icon fas ' + (icons[type] || icons.info) + '"></i>' +
-                '<div class="alert-body">' + text + '</div>' +
-                '</div>';
+<script>
+/* ============================================================
+   ALERT HELPERS
+============================================================ */
+
+function showAlert(el, type, text) {
+    const icons = {
+        success: 'fa-check-circle',
+        error: 'fa-exclamation-circle',
+        warning: 'fa-triangle-exclamation',
+        info: 'fa-circle-notch fa-spin'
+    };
+
+    el.className = 'alert show ' + type;
+
+    el.innerHTML =
+        '<div class="alert-stripe"></div>' +
+        '<div class="alert-inner">' +
+            '<i class="alert-icon fas ' + (icons[type] || icons.info) + '"></i>' +
+            '<div class="alert-body"></div>' +
+        '</div>';
+
+    /*
+     * Pakai textContent supaya response API tidak dianggap HTML.
+     * \n tetap tampil karena .alert-body memakai white-space: pre-wrap.
+     */
+    const body = el.querySelector('.alert-body');
+    body.textContent = String(text || '');
+}
+
+function hideAlert(el) {
+    el.className = 'alert';
+    el.innerHTML = '';
+}
+
+function showModalError(el, text) {
+    const body = el.querySelector('.alert-body');
+
+    if (body) {
+        body.textContent = String(text || '');
+    }
+
+    el.classList.add('show');
+}
+
+function hideModalError(el) {
+    el.classList.remove('show');
+}
+
+
+/* ============================================================
+   MAIN ELEMENTS
+============================================================ */
+
+const form = document.getElementById('reactForm');
+const button = document.getElementById('submitButton');
+const result = document.getElementById('result');
+
+const reactionInput = document.getElementById('reaction');
+
+const limitFill = document.getElementById('limitFill');
+const limitNum = document.getElementById('limitNum');
+const limitResetInfo = document.getElementById('limitResetInfo');
+
+const emojiCountEl = document.getElementById('emojiCount');
+
+
+/* ============================================================
+   LIMIT CONFIG
+============================================================ */
+
+const LIMIT_MAX = 10;
+const LIMIT_COST = 2;
+const STORE_KEY = 'wa_react_limit';
+const MAX_EMOJI = 5;
+
+
+/* ============================================================
+   STORAGE
+============================================================ */
+
+function todayStr() {
+    return new Date().toISOString().slice(0, 10);
+}
+
+function loadLimit() {
+    try {
+        const raw = localStorage.getItem(STORE_KEY);
+
+        if (!raw) {
+            return {
+                limit: LIMIT_MAX,
+                lastReset: todayStr()
+            };
         }
 
-        function hideAlert(el) { el.className = 'alert';
-            el.innerHTML = ''; }
+        const data = JSON.parse(raw);
 
-        function showModalError(el, text) {
-            el.querySelector('.alert-body').textContent = text;
-            el.classList.add('show');
+        if (
+            !data ||
+            data.lastReset !== todayStr()
+        ) {
+            return {
+                limit: LIMIT_MAX,
+                lastReset: todayStr()
+            };
         }
 
-        function hideModalError(el) { el.classList.remove('show'); }
+        return {
+            limit: Number.isFinite(Number(data.limit))
+                ? Number(data.limit)
+                : LIMIT_MAX,
 
-        const form = document.getElementById('reactForm');
-        const button = document.getElementById('submitButton');
-        const result = document.getElementById('result');
-        const reactionInput = document.getElementById('reaction');
-        const limitFill = document.getElementById('limitFill');
-        const limitNum = document.getElementById('limitNum');
-        const limitResetInfo = document.getElementById('limitResetInfo');
-        const emojiCountEl = document.getElementById('emojiCount');
+            lastReset: data.lastReset,
 
-        const LIMIT_MAX = 10;
-        const LIMIT_COST = 2;
-        const STORE_KEY = 'wa_react_limit';
-        const MAX_EMOJI = 5;
+            serverLimit: data.serverLimit,
+            serverUsed: data.serverUsed
+        };
 
-        /* ── Storage helpers ── */
-        function todayStr() {
-            return new Date().toISOString().slice(0, 10);
+    } catch (e) {
+        return {
+            limit: LIMIT_MAX,
+            lastReset: todayStr()
+        };
+    }
+}
+
+function saveLimit(data) {
+    try {
+        localStorage.setItem(
+            STORE_KEY,
+            JSON.stringify(data)
+        );
+    } catch (e) {
+        console.warn('Gagal menyimpan limit lokal:', e);
+    }
+}
+
+function deductLimit() {
+    const data = loadLimit();
+
+    data.limit = Math.max(
+        0,
+        Number(data.limit || 0) - LIMIT_COST
+    );
+
+    saveLimit(data);
+
+    return data.limit;
+}
+
+
+/* ============================================================
+   LIMIT UI
+============================================================ */
+
+function updateLimitUI() {
+    const data = loadLimit();
+
+    const current = Math.max(
+        0,
+        Number(data.limit || 0)
+    );
+
+    const pct = Math.max(
+        0,
+        Math.min(
+            100,
+            (current / LIMIT_MAX) * 100
+        )
+    );
+
+    limitNum.textContent =
+        current + '/' + LIMIT_MAX;
+
+    limitFill.style.width =
+        pct + '%';
+
+    limitFill.classList.remove(
+        'warn',
+        'danger'
+    );
+
+    if (current <= 2) {
+        limitFill.classList.add('danger');
+    } else if (current <= 4) {
+        limitFill.classList.add('warn');
+    }
+
+    const tomorrow = new Date();
+
+    tomorrow.setDate(
+        tomorrow.getDate() + 1
+    );
+
+    tomorrow.setHours(
+        0,
+        0,
+        0,
+        0
+    );
+
+    const hoursLeft = Math.max(
+        0,
+        Math.ceil(
+            (tomorrow.getTime() - Date.now()) /
+            3600000
+        )
+    );
+
+    limitResetInfo.textContent =
+        'Reset dalam ~' +
+        hoursLeft +
+        ' jam';
+
+    if (current < LIMIT_COST) {
+
+        button.disabled = true;
+
+        button.classList.add(
+            'no-limit'
+        );
+
+        button.innerHTML =
+            '<i class="fas fa-ban"></i> LIMIT HABIS';
+
+    } else {
+
+        button.classList.remove(
+            'no-limit'
+        );
+
+        if (!button.dataset.loading) {
+
+            button.disabled = false;
+
+            button.innerHTML =
+                '<i class="fas fa-paper-plane"></i> Kirim Reaction';
         }
+    }
+}
 
-        function loadLimit() {
-            try {
-                const raw = localStorage.getItem(STORE_KEY);
-                if (!raw) return { limit: LIMIT_MAX, lastReset: todayStr() };
-                const data = JSON.parse(raw);
-                if (data.lastReset !== todayStr()) {
-                    return { limit: LIMIT_MAX, lastReset: todayStr() };
-                }
-                return data;
-            } catch (e) {
-                return { limit: LIMIT_MAX, lastReset: todayStr() };
-            }
-        }
 
-        function saveLimit(data) {
-            localStorage.setItem(STORE_KEY, JSON.stringify(data));
-        }
+/* ============================================================
+   EMOJI
+============================================================ */
 
-        function deductLimit() {
-            const data = loadLimit();
-            data.limit = Math.max(0, data.limit - LIMIT_COST);
-            saveLimit(data);
-            return data.limit;
-        }
+function getEmojiCount(raw) {
 
-        /* ── UI update ── */
-        function updateLimitUI() {
-            const data = loadLimit();
-            const current = data.limit;
-            const pct = (current / LIMIT_MAX) * 100;
+    if (!raw.trim()) {
+        return 0;
+    }
 
-            limitNum.textContent = current + '/' + LIMIT_MAX;
-            limitFill.style.width = pct + '%';
+    return raw
+        .split(',')
+        .map(function(s) {
+            return s.trim();
+        })
+        .filter(function(s) {
+            return s.length > 0;
+        })
+        .length;
+}
 
-            limitFill.classList.remove('warn', 'danger');
-            if (current <= 2) limitFill.classList.add('danger');
-            else if (current <= 4) limitFill.classList.add('warn');
+function updateEmojiCounter() {
 
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            tomorrow.setHours(0, 0, 0, 0);
-            const hoursLeft = Math.ceil((tomorrow - Date.now()) / 3600000);
-            limitResetInfo.textContent = 'Reset dalam ~' + hoursLeft + ' jam';
+    const raw =
+        reactionInput.value;
 
-            if (current < LIMIT_COST) {
-                button.disabled = true;
-                button.classList.add('no-limit');
-                button.innerHTML = '<i class="fas fa-ban"></i> LIMIT HABIS';
-            } else {
-                button.classList.remove('no-limit');
-                if (!button.dataset.loading) {
-                    button.disabled = false;
-                    button.innerHTML = '<i class="fas fa-paper-plane"></i> Kirim Reaction';
-                }
-            }
-        }
+    const count =
+        getEmojiCount(raw);
 
-        /* ── Emoji normalise & counter ── */
-        function getEmojiCount(raw) {
-            if (!raw.trim()) return 0;
-            return raw.split(',')
-                .map(function(s) { return s.trim(); })
-                .filter(function(s) { return s.length > 0; })
-                .length;
-        }
+    emojiCountEl.textContent =
+        count +
+        ' / ' +
+        MAX_EMOJI;
 
-        function updateEmojiCounter() {
-            const raw = reactionInput.value;
-            const count = getEmojiCount(raw);
-            emojiCountEl.textContent = count + ' / ' + MAX_EMOJI;
-            emojiCountEl.classList.toggle('maxed', count >= MAX_EMOJI);
-        }
+    emojiCountEl.classList.toggle(
+        'maxed',
+        count >= MAX_EMOJI
+    );
+}
 
-        function normaliseEmojis(raw) {
-            // Ambil maksimal 5 emoji
-            const emojis = raw.split(',')
-                .map(function(s) { return s.trim(); })
-                .filter(function(s) { return s.length > 0; });
+function normaliseEmojis(raw) {
 
-            // Potong ke maksimal 5
-            const limited = emojis.slice(0, MAX_EMOJI);
-            return limited.join(',');
-        }
-
-        /* ── Event listener untuk batas emoji ── */
-        reactionInput.addEventListener('input', function() {
-            const raw = this.value;
-            const count = getEmojiCount(raw);
-
-            // Jika melebihi 5, potong otomatis
-            if (count > MAX_EMOJI) {
-                // Ambil 5 emoji pertama
-                const emojis = raw.split(',')
-                    .map(function(s) { return s.trim(); })
-                    .filter(function(s) { return s.length > 0; });
-                const limited = emojis.slice(0, MAX_EMOJI);
-                this.value = limited.join(', ');
-                // Hapus spasi berlebih di akhir
-                this.value = this.value.replace(/,\s*$/, '');
-            }
-
-            updateEmojiCounter();
-
-            // Jika emoji penuh, beri feedback visual
-            const currentCount = getEmojiCount(this.value);
-            if (currentCount >= MAX_EMOJI) {
-                this.style.borderColor = 'var(--green)';
-                this.style.background = '#edfff5';
-            } else {
-                this.style.borderColor = '';
-                this.style.background = '';
-            }
+    const emojis = raw
+        .split(',')
+        .map(function(s) {
+            return s.trim();
+        })
+        .filter(function(s) {
+            return s.length > 0;
         });
 
-        // Inisialisasi counter
+    return emojis
+        .slice(0, MAX_EMOJI)
+        .join(',');
+}
+
+
+/* ============================================================
+   EMOJI INPUT LIMIT
+============================================================ */
+
+reactionInput.addEventListener(
+    'input',
+    function() {
+
+        const raw =
+            this.value;
+
+        const count =
+            getEmojiCount(raw);
+
+        if (count > MAX_EMOJI) {
+
+            const emojis =
+                raw
+                    .split(',')
+                    .map(function(s) {
+                        return s.trim();
+                    })
+                    .filter(function(s) {
+                        return s.length > 0;
+                    });
+
+            this.value =
+                emojis
+                    .slice(0, MAX_EMOJI)
+                    .join(', ');
+
+            this.value =
+                this.value.replace(
+                    /,\s*$/,
+                    ''
+                );
+        }
+
         updateEmojiCounter();
 
-        async function syncServerLimit(){
-    try{
-        const r=await fetch('/api/usage',{cache:'no-store'}); const d=await r.json();
-        if(d.ok){
-            const local=loadLimit(); local.limit=d.remaining; local.serverLimit=d.limit; local.serverUsed=d.used; saveLimit(local); updateLimitUI();
+        const currentCount =
+            getEmojiCount(this.value);
+
+        if (
+            currentCount >=
+            MAX_EMOJI
+        ) {
+
+            this.style.borderColor =
+                'var(--green)';
+
+            this.style.background =
+                '#edfff5';
+
+        } else {
+
+            this.style.borderColor =
+                '';
+
+            this.style.background =
+                '';
         }
-    }catch(e){}
+    }
+);
+
+
+/* ============================================================
+   SERVER LIMIT SYNC
+============================================================ */
+
+async function syncServerLimit() {
+
+    try {
+
+        const response =
+            await fetch(
+                '/api/usage',
+                {
+                    method: 'GET',
+                    cache: 'no-store',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Accept':
+                            'application/json'
+                    }
+                }
+            );
+
+        const text =
+            await response.text();
+
+        let data;
+
+        try {
+            data =
+                JSON.parse(text);
+        } catch {
+            return;
+        }
+
+        if (
+            response.ok &&
+            data &&
+            data.ok
+        ) {
+
+            const local =
+                loadLimit();
+
+            local.limit =
+                Number(
+                    data.remaining ?? LIMIT_MAX
+                );
+
+            local.serverLimit =
+                Number(
+                    data.limit ?? LIMIT_MAX
+                );
+
+            local.serverUsed =
+                Number(
+                    data.used ?? 0
+                );
+
+            local.lastReset =
+                todayStr();
+
+            saveLimit(local);
+
+            updateLimitUI();
+        }
+
+    } catch (e) {
+
+        console.warn(
+            'Sync server limit gagal:',
+            e
+        );
+    }
 }
-syncServerLimit();
 
-/* ── Submit handler ── */
-        form.addEventListener('submit', async function(event) {
 
-            event.preventDefault();
+/* ============================================================
+   INITIALIZE
+============================================================ */
 
-            if (button.disabled) return;
+(function init() {
 
-            const limitData = loadLimit();
-            if (limitData.limit < LIMIT_COST) {
-                await syncServerLimit();
-                const fresh=loadLimit();
-                if(fresh.limit < LIMIT_COST){showAlert(result,'error','Limit harian kamu sudah habis.\nBalik lagi besok ya — limit direset otomatis setiap hari!');updateLimitUI();return;}
-            }
+    const data =
+        loadLimit();
 
-            const url = document.getElementById('url').value.trim();
-            const rawEmoji = reactionInput.value.trim();
-            const reaction = normaliseEmojis(rawEmoji);
+    saveLimit(data);
 
-            if (!url) {
-                showAlert(result, 'error', 'Link postingan wajib diisi.');
+    updateLimitUI();
+
+    updateEmojiCounter();
+
+    syncServerLimit();
+
+})();
+
+
+/* ============================================================
+   REACTION SUBMIT
+============================================================ */
+
+form.addEventListener(
+    'submit',
+    async function(event) {
+
+        event.preventDefault();
+
+        if (button.disabled) {
+            return;
+        }
+
+
+        /* ----------------------------------------------------
+           CEK LIMIT LOKAL
+        ---------------------------------------------------- */
+
+        let limitData =
+            loadLimit();
+
+        if (
+            Number(limitData.limit) <
+            LIMIT_COST
+        ) {
+
+            await syncServerLimit();
+
+            limitData =
+                loadLimit();
+
+            if (
+                Number(limitData.limit) <
+                LIMIT_COST
+            ) {
+
+                showAlert(
+                    result,
+                    'error',
+                    'Limit harian kamu sudah habis.\nBalik lagi besok ya — limit direset otomatis setiap hari!'
+                );
+
+                updateLimitUI();
+
                 return;
             }
+        }
 
-            if (!reaction) {
-                showAlert(result, 'error', 'Ketik minimal satu emoji reaction.');
-                return;
-            }
 
-            const emojiCount = reaction.split(',').length;
+        /* ----------------------------------------------------
+           AMBIL INPUT
+        ---------------------------------------------------- */
 
-            button.disabled = true;
-            button.dataset.loading = '1';
-            button.classList.remove('no-limit');
-            button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> MEMPROSES...';
+        const url =
+            document
+                .getElementById('url')
+                .value
+                .trim();
 
-            showAlert(result, 'info', emojiCount > 1 ?
-                'Mengirim ' + emojiCount + ' reaction... harap tunggu.' :
-                'Mengirim reaction...');
+        const rawEmoji =
+            reactionInput
+                .value
+                .trim();
+
+        const reaction =
+            normaliseEmojis(
+                rawEmoji
+            );
+
+
+        if (!url) {
+
+            showAlert(
+                result,
+                'error',
+                'Link postingan wajib diisi.'
+            );
+
+            return;
+        }
+
+
+        if (!reaction) {
+
+            showAlert(
+                result,
+                'error',
+                'Ketik minimal satu emoji reaction.'
+            );
+
+            return;
+        }
+
+
+        const emojiCount =
+            reaction
+                .split(',')
+                .length;
+
+
+        /* ----------------------------------------------------
+           LOADING
+        ---------------------------------------------------- */
+
+        button.disabled = true;
+
+        button.dataset.loading =
+            '1';
+
+        button.classList.remove(
+            'no-limit'
+        );
+
+        button.innerHTML =
+            '<i class="fas fa-spinner fa-spin"></i> MEMPROSES...';
+
+
+        showAlert(
+            result,
+            'info',
+            emojiCount > 1
+                ? 'Mengirim ' +
+                  emojiCount +
+                  ' reaction... harap tunggu.'
+                : 'Mengirim reaction...'
+        );
+
+
+        /* ----------------------------------------------------
+           REQUEST
+        ---------------------------------------------------- */
+
+        try {
+
+            const response =
+                await fetch(
+                    '/api/react',
+                    {
+                        method: 'POST',
+
+                        headers: {
+                            'Content-Type':
+                                'application/json',
+
+                            'Accept':
+                                'application/json'
+                        },
+
+                        credentials:
+                            'same-origin',
+
+                        body:
+                            JSON.stringify({
+                                url: url,
+                                reaction: reaction
+                            }),
+
+                        cache:
+                            'no-store'
+                    }
+                );
+
+
+            /*
+             * Jangan langsung response.text()
+             * lalu ditampilkan.
+             *
+             * API kamu mengembalikan:
+             *
+             * {
+             *   "ok": true,
+             *   "message": "..."
+             * }
+             *
+             * Jadi kita parse JSON terlebih dahulu.
+             */
+
+            const rawResponse =
+                await response.text();
+
+            let data = null;
 
             try {
 
-                const response = await fetch('/api/react', {
-                    method: 'POST',
-                    headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({url, reaction}),
-                    cache: 'no-store'
-                });
+                data =
+                    rawResponse
+                        ? JSON.parse(
+                            rawResponse
+                        )
+                        : null;
 
-                const text = await response.text();
+            } catch (parseError) {
+
+                /*
+                 * Fallback kalau server
+                 * ternyata mengembalikan
+                 * plain text.
+                 */
+
+                data = null;
+            }
+
+
+            /* ------------------------------------------------
+               AMBIL MESSAGE SAJA
+            ------------------------------------------------ */
+
+            let message = '';
+
+            if (
+                data &&
+                typeof data === 'object'
+            ) {
+
+                message =
+                    data.message ||
+                    data.error ||
+                    (
+                        data.data &&
+                        data.data.message
+                    ) ||
+                    '';
+
+            }
+
+
+            /*
+             * Fallback plain text.
+             */
+
+            if (!message) {
+
+                message =
+                    rawResponse ||
+                    (
+                        response.ok
+                            ? 'Request berhasil diproses.'
+                            : 'Request gagal diproses.'
+                    );
+            }
+
+
+            /* ------------------------------------------------
+               SUCCESS
+            ------------------------------------------------ */
+
+            if (
+                response.ok &&
+                data?.ok !== false
+            ) {
+
+                /*
+                 * HANYA kurangi limit
+                 * jika server benar-benar
+                 * menganggap request berhasil.
+                 */
 
                 deductLimit();
 
-                if (response.ok) {
-                    showAlert(result, 'success', text);
-                    button.innerHTML = '<i class="fas fa-check-circle"></i> BERHASIL';
-                } else {
-                    showAlert(result, 'error', text);
-                    button.innerHTML = '<i class="fas fa-exclamation-circle"></i> GAGAL';
-                }
+                showAlert(
+                    result,
+                    'success',
+                    message
+                );
 
-            } catch (error) {
+                button.innerHTML =
+                    '<i class="fas fa-check-circle"></i> BERHASIL';
 
-                showAlert(result, 'error', 'Tidak dapat menghubungi server.\n\n' + error.message);
-                button.innerHTML = '<i class="fas fa-exclamation-circle"></i> ERROR';
 
-            } finally {
+                /*
+                 * Sinkronkan lagi dengan
+                 * server supaya angka quota
+                 * frontend tidak melenceng.
+                 */
 
-                delete button.dataset.loading;
+                setTimeout(
+                    function() {
+                        syncServerLimit();
+                    },
+                    500
+                );
 
-                setTimeout(function() {
-                    updateLimitUI();
-                }, 1800);
             }
-        });
 
-        (function init() {
-            const data = loadLimit();
-            saveLimit(data);
-            updateLimitUI();
-            updateEmojiCounter();
-        })();
 
-        /* ── Admin Modal ── */
+            /* ------------------------------------------------
+               ERROR
+            ------------------------------------------------ */
+
+            else {
+
+                /*
+                 * Jangan deductLimit()
+                 * kalau request gagal.
+                 */
+
+                showAlert(
+                    result,
+                    data?.partial
+                        ? 'warning'
+                        : 'error',
+                    message
+                );
+
+                button.innerHTML =
+                    '<i class="fas fa-exclamation-circle"></i> GAGAL';
+
+
+                /*
+                 * Ambil quota asli dari server.
+                 */
+
+                setTimeout(
+                    function() {
+                        syncServerLimit();
+                    },
+                    300
+                );
+            }
+
+
+        } catch (error) {
+
+            console.error(
+                'REACTION REQUEST ERROR:',
+                error
+            );
+
+            showAlert(
+                result,
+                'error',
+                'Tidak dapat menghubungi server.\n\n' +
+                (
+                    error?.message ||
+                    'Request gagal.'
+                )
+            );
+
+            button.innerHTML =
+                '<i class="fas fa-exclamation-circle"></i> ERROR';
+
+        } finally {
+
+            delete button.dataset.loading;
+
+            setTimeout(
+                function() {
+                    updateLimitUI();
+                },
+                1800
+            );
+        }
+    }
+);
+
+
+/* ============================================================
+   ADMIN MODAL
+============================================================ */
+
 (function adminModal() {
-    const shieldBtn=document.getElementById('shieldBtn'),modal=document.getElementById('adminModal'),
-    modalClose=document.getElementById('modalClose'),adminPw=document.getElementById('adminPassword'),
-    adminSubmit=document.getElementById('adminSubmit'),modalError=document.getElementById('modalError'),
-    togglePw=document.getElementById('togglePw'),rememberLogin=document.getElementById('rememberLogin');
 
-    function openModal(){modal.classList.add('open');adminPw.value='';rememberLogin.checked=false;hideModalError(modalError);adminSubmit.disabled=false;adminSubmit.innerHTML='<i class="fas fa-sign-in-alt"></i> Login';setTimeout(()=>adminPw.focus(),80)}
-    function closeModal(){modal.classList.remove('open');adminPw.value='';hideModalError(modalError)}
-    async function attemptAutoLogin(){
-      const m=await fetch('/api/auth?action=me',{cache:'no-store',credentials:'same-origin'}).then(r=>r.json()).catch(()=>({ok:false}));
-      if(m.ok){window.location.href='/admin.html';return} openModal();
+    const shieldBtn =
+        document.getElementById(
+            'shieldBtn'
+        );
+
+    const modal =
+        document.getElementById(
+            'adminModal'
+        );
+
+    const modalClose =
+        document.getElementById(
+            'modalClose'
+        );
+
+    const adminPw =
+        document.getElementById(
+            'adminPassword'
+        );
+
+    const adminSubmit =
+        document.getElementById(
+            'adminSubmit'
+        );
+
+    const modalError =
+        document.getElementById(
+            'modalError'
+        );
+
+    const togglePw =
+        document.getElementById(
+            'togglePw'
+        );
+
+    const rememberLogin =
+        document.getElementById(
+            'rememberLogin'
+        );
+
+
+    function openModal() {
+
+        modal.classList.add(
+            'open'
+        );
+
+        adminPw.value = '';
+
+        rememberLogin.checked =
+            false;
+
+        hideModalError(
+            modalError
+        );
+
+        adminSubmit.disabled =
+            false;
+
+        adminSubmit.innerHTML =
+            '<i class="fas fa-sign-in-alt"></i> Login';
+
+        setTimeout(
+            function() {
+                adminPw.focus();
+            },
+            80
+        );
     }
-    shieldBtn.addEventListener('click',attemptAutoLogin);modalClose.addEventListener('click',closeModal);
-    modal.addEventListener('click',e=>{if(e.target===modal)closeModal()});
-    document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modal.classList.contains('open'))closeModal()});
-    togglePw.addEventListener('click',()=>{adminPw.type=adminPw.type==='password'?'text':'password';togglePw.innerHTML=adminPw.type==='password'?'<i class="fas fa-eye"></i>':'<i class="fas fa-eye-slash"></i>'});
-    async function doLogin(pw){
-      if(!pw){showModalError(modalError,'Password tidak boleh kosong.');return}
-      adminSubmit.disabled=true;adminSubmit.innerHTML='<i class="fas fa-spinner fa-spin"></i> Memeriksa...';hideModalError(modalError);
-      try{
-        const res=await fetch('/api/auth',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({action:'login',password:pw})});
-        const data=await res.json();
-        if(data.ok){adminSubmit.innerHTML='<i class="fas fa-check-circle"></i> Berhasil!';setTimeout(()=>window.location.href='/admin.html',350)}
-        else{showModalError(modalError,data.message||'Password salah.');adminSubmit.disabled=false;adminSubmit.innerHTML='<i class="fas fa-sign-in-alt"></i> Login';adminPw.select()}
-      }catch(e){showModalError(modalError,'Tidak dapat menghubungi server.');adminSubmit.disabled=false;adminSubmit.innerHTML='<i class="fas fa-sign-in-alt"></i> Login'}
+
+
+    function closeModal() {
+
+        modal.classList.remove(
+            'open'
+        );
+
+        adminPw.value = '';
+
+        hideModalError(
+            modalError
+        );
     }
-    adminSubmit.addEventListener('click',()=>doLogin(adminPw.value));
-    adminPw.addEventListener('keydown',e=>{if(e.key==='Enter')doLogin(adminPw.value)});
+
+
+    async function attemptAutoLogin() {
+
+        try {
+
+            const response =
+                await fetch(
+                    '/api/auth?action=me',
+                    {
+                        method: 'GET',
+                        cache: 'no-store',
+                        credentials:
+                            'same-origin',
+
+                        headers: {
+                            'Accept':
+                                'application/json'
+                        }
+                    }
+                );
+
+            const text =
+                await response.text();
+
+            let data;
+
+            try {
+                data =
+                    JSON.parse(text);
+            } catch {
+                data = {
+                    ok: false
+                };
+            }
+
+            if (
+                response.ok &&
+                data.ok
+            ) {
+
+                window.location.href =
+                    '/admin.html';
+
+                return;
+            }
+
+        } catch (e) {
+
+            console.warn(
+                'Auto login gagal:',
+                e
+            );
+        }
+
+        openModal();
+    }
+
+
+    shieldBtn.addEventListener(
+        'click',
+        attemptAutoLogin
+    );
+
+
+    modalClose.addEventListener(
+        'click',
+        closeModal
+    );
+
+
+    modal.addEventListener(
+        'click',
+        function(e) {
+
+            if (
+                e.target === modal
+            ) {
+                closeModal();
+            }
+        }
+    );
+
+
+    document.addEventListener(
+        'keydown',
+        function(e) {
+
+            if (
+                e.key === 'Escape' &&
+                modal.classList.contains(
+                    'open'
+                )
+            ) {
+                closeModal();
+            }
+        }
+    );
+
+
+    togglePw.addEventListener(
+        'click',
+        function() {
+
+            adminPw.type =
+                adminPw.type ===
+                'password'
+                    ? 'text'
+                    : 'password';
+
+            togglePw.innerHTML =
+                adminPw.type ===
+                'password'
+                    ? '<i class="fas fa-eye"></i>'
+                    : '<i class="fas fa-eye-slash"></i>';
+        }
+    );
+
+
+    async function doLogin(pw) {
+
+        if (!pw) {
+
+            showModalError(
+                modalError,
+                'Password tidak boleh kosong.'
+            );
+
+            return;
+        }
+
+
+        adminSubmit.disabled =
+            true;
+
+        adminSubmit.innerHTML =
+            '<i class="fas fa-spinner fa-spin"></i> Memeriksa...';
+
+        hideModalError(
+            modalError
+        );
+
+
+        try {
+
+            const response =
+                await fetch(
+                    '/api/auth',
+                    {
+                        method: 'POST',
+
+                        headers: {
+                            'Content-Type':
+                                'application/json',
+
+                            'Accept':
+                                'application/json'
+                        },
+
+                        credentials:
+                            'same-origin',
+
+                        body:
+                            JSON.stringify({
+                                action:
+                                    'login',
+
+                                password:
+                                    pw
+                            })
+                    }
+                );
+
+
+            const text =
+                await response.text();
+
+            let data;
+
+            try {
+
+                data =
+                    JSON.parse(
+                        text
+                    );
+
+            } catch {
+
+                data = {
+                    ok: false,
+                    message:
+                        text ||
+                        'Response server tidak valid.'
+                };
+            }
+
+
+            if (
+                response.ok &&
+                data.ok
+            ) {
+
+                adminSubmit.innerHTML =
+                    '<i class="fas fa-check-circle"></i> Berhasil!';
+
+                setTimeout(
+                    function() {
+                        window.location.href =
+                            '/admin.html';
+                    },
+                    350
+                );
+
+            } else {
+
+                showModalError(
+                    modalError,
+                    data.message ||
+                    'Password salah.'
+                );
+
+                adminSubmit.disabled =
+                    false;
+
+                adminSubmit.innerHTML =
+                    '<i class="fas fa-sign-in-alt"></i> Login';
+
+                adminPw.select();
+            }
+
+
+        } catch (e) {
+
+            console.error(
+                'ADMIN LOGIN ERROR:',
+                e
+            );
+
+            showModalError(
+                modalError,
+                'Tidak dapat menghubungi server.'
+            );
+
+            adminSubmit.disabled =
+                false;
+
+            adminSubmit.innerHTML =
+                '<i class="fas fa-sign-in-alt"></i> Login';
+        }
+    }
+
+
+    adminSubmit.addEventListener(
+        'click',
+        function() {
+            doLogin(
+                adminPw.value
+            );
+        }
+    );
+
+
+    adminPw.addEventListener(
+        'keydown',
+        function(e) {
+
+            if (
+                e.key === 'Enter'
+            ) {
+                doLogin(
+                    adminPw.value
+                );
+            }
+        }
+    );
+
 })();
 
-/* ── Redeem Modal ── */
-        (function redeemModal() {
-            const redeemBtn = document.getElementById('redeemBtn');
-            const modal = document.getElementById('redeemModal');
-            const modalClose = document.getElementById('redeemModalClose');
-            const redeemCode = document.getElementById('redeemCode');
-            const redeemSubmit = document.getElementById('redeemSubmit');
-            const redeemError = document.getElementById('redeemError');
 
-            function openModal() {
-                modal.classList.add('open');
-                redeemCode.value = '';
-                hideModalError(redeemError);
-                redeemSubmit.disabled = false;
-                redeemSubmit.innerHTML = '<i class="fas fa-check"></i> Redeem';
-                setTimeout(function() { redeemCode.focus(); }, 80);
+/* ============================================================
+   REDEEM MODAL
+============================================================ */
+
+(function redeemModal() {
+
+    const redeemBtn =
+        document.getElementById(
+            'redeemBtn'
+        );
+
+    const modal =
+        document.getElementById(
+            'redeemModal'
+        );
+
+    const modalClose =
+        document.getElementById(
+            'redeemModalClose'
+        );
+
+    const redeemCode =
+        document.getElementById(
+            'redeemCode'
+        );
+
+    const redeemSubmit =
+        document.getElementById(
+            'redeemSubmit'
+        );
+
+    const redeemError =
+        document.getElementById(
+            'redeemError'
+        );
+
+
+    function openModal() {
+
+        modal.classList.add(
+            'open'
+        );
+
+        redeemCode.value =
+            '';
+
+        hideModalError(
+            redeemError
+        );
+
+        redeemSubmit.disabled =
+            false;
+
+        redeemSubmit.innerHTML =
+            '<i class="fas fa-check"></i> Redeem';
+
+        setTimeout(
+            function() {
+                redeemCode.focus();
+            },
+            80
+        );
+    }
+
+
+    function closeModal() {
+
+        modal.classList.remove(
+            'open'
+        );
+
+        redeemCode.value =
+            '';
+
+        hideModalError(
+            redeemError
+        );
+    }
+
+
+    redeemBtn.addEventListener(
+        'click',
+        openModal
+    );
+
+
+    modalClose.addEventListener(
+        'click',
+        closeModal
+    );
+
+
+    modal.addEventListener(
+        'click',
+        function(e) {
+
+            if (
+                e.target === modal
+            ) {
+                closeModal();
             }
+        }
+    );
 
-            function closeModal() {
-                modal.classList.remove('open');
-                redeemCode.value = '';
-                hideModalError(redeemError);
+
+    document.addEventListener(
+        'keydown',
+        function(e) {
+
+            if (
+                e.key === 'Escape' &&
+                modal.classList.contains(
+                    'open'
+                )
+            ) {
+                closeModal();
             }
+        }
+    );
 
-            redeemBtn.addEventListener('click', openModal);
-            modalClose.addEventListener('click', closeModal);
 
-            modal.addEventListener('click', function(e) {
-                if (e.target === modal) closeModal();
-            });
+    async function doRedeem() {
 
-            document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape' && modal.classList.contains('open')) closeModal();
-            });
+        const code =
+            redeemCode.value.trim();
 
-            async function doRedeem() {
-                const code = redeemCode.value.trim();
-                if (!code) {
-                    showModalError(redeemError, 'Kode tidak boleh kosong.');
-                    return;
-                }
 
-                redeemSubmit.disabled = true;
-                redeemSubmit.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Memproses...';
-                hideModalError(redeemError);
+        if (!code) {
 
-                try {
-                    const res = await fetch('/api/redeem', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({action:'redeem', code}), cache: 'no-store' });
-                    const data = await res.json();
+            showModalError(
+                redeemError,
+                'Kode tidak boleh kosong.'
+            );
 
-                    if (data.ok) {
-                        redeemSubmit.innerHTML = '<i class="fas fa-check-circle"></i> Berhasil!';
+            return;
+        }
 
-                        const limitData = loadLimit();
-                        limitData.limit = Math.min(LIMIT_MAX + (data.bonus || 0), limitData.limit + (data.bonus || 0));
-                        saveLimit(limitData);
-                        updateLimitUI();
-                        syncServerLimit();
 
-                        setTimeout(function() {
-                            closeModal();
-                            redeemError.style.display = 'none';
-                            redeemSubmit.disabled = false;
-                            redeemSubmit.innerHTML = '<i class="fas fa-check"></i> Redeem';
-                        }, 1200);
-                    } else {
-                        showModalError(redeemError, data.message || 'Kode tidak valid.');
-                        redeemSubmit.disabled = false;
-                        redeemSubmit.innerHTML = '<i class="fas fa-check"></i> Redeem';
-                        redeemCode.select();
+        redeemSubmit.disabled =
+            true;
+
+        redeemSubmit.innerHTML =
+            '<i class="fas fa-spinner fa-spin"></i> Memproses...';
+
+        hideModalError(
+            redeemError
+        );
+
+
+        try {
+
+            const response =
+                await fetch(
+                    '/api/redeem',
+                    {
+                        method: 'POST',
+
+                        headers: {
+                            'Content-Type':
+                                'application/json',
+
+                            'Accept':
+                                'application/json'
+                        },
+
+                        credentials:
+                            'same-origin',
+
+                        body:
+                            JSON.stringify({
+                                action:
+                                    'redeem',
+
+                                code:
+                                    code
+                            }),
+
+                        cache:
+                            'no-store'
                     }
-                } catch (err) {
-                    showModalError(redeemError, 'Tidak dapat menghubungi server.');
-                    redeemSubmit.disabled = false;
-                    redeemSubmit.innerHTML = '<i class="fas fa-check"></i> Redeem';
-                }
+                );
+
+
+            const text =
+                await response.text();
+
+            let data;
+
+            try {
+
+                data =
+                    JSON.parse(
+                        text
+                    );
+
+            } catch {
+
+                data = {
+                    ok: false,
+                    message:
+                        text ||
+                        'Response server tidak valid.'
+                };
             }
 
-            redeemSubmit.addEventListener('click', doRedeem);
 
-            redeemCode.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') doRedeem();
-            });
-        })();
+            if (
+                response.ok &&
+                data.ok
+            ) {
 
-        /* ============================================================ */
-        /* TUTORIAL MODAL SCRIPT                                         */
-        /* ============================================================ */
-        (function tutorialModal() {
-            const tutorialBtn = document.getElementById('tutorialBtn');
-            const tutorialModal = document.getElementById('tutorialModal');
-            const tutorialClose = document.getElementById('tutorialModalClose');
-            const tutorialCloseBtn = document.getElementById('tutorialCloseBtn');
-            const videoEl = document.getElementById('tutorialVideo');
+                redeemSubmit.innerHTML =
+                    '<i class="fas fa-check-circle"></i> Berhasil!';
 
-            function openTutorial() {
-                tutorialModal.classList.add('open');
-                document.body.style.overflow = 'hidden';
-                // Play video saat modal dibuka
-                if (videoEl) {
-                    videoEl.play().catch(function() {});
-                }
+
+                const limitData =
+                    loadLimit();
+
+                const bonus =
+                    Number(
+                        data.bonus || 0
+                    );
+
+
+                limitData.limit =
+                    Math.min(
+                        LIMIT_MAX + bonus,
+                        Number(
+                            limitData.limit ||
+                            LIMIT_MAX
+                        ) + bonus
+                    );
+
+
+                saveLimit(
+                    limitData
+                );
+
+                updateLimitUI();
+
+                syncServerLimit();
+
+
+                setTimeout(
+                    function() {
+
+                        closeModal();
+
+                        redeemSubmit.disabled =
+                            false;
+
+                        redeemSubmit.innerHTML =
+                            '<i class="fas fa-check"></i> Redeem';
+
+                    },
+                    1200
+                );
+
+
+            } else {
+
+                showModalError(
+                    redeemError,
+                    data.message ||
+                    'Kode tidak valid.'
+                );
+
+                redeemSubmit.disabled =
+                    false;
+
+                redeemSubmit.innerHTML =
+                    '<i class="fas fa-check"></i> Redeem';
+
+                redeemCode.select();
             }
 
-            function closeTutorial() {
-                tutorialModal.classList.remove('open');
-                document.body.style.overflow = '';
-                // Hentikan video saat modal ditutup
-                if (videoEl) {
-                    videoEl.pause();
-                    videoEl.currentTime = 0;
-                }
+
+        } catch (err) {
+
+            console.error(
+                'REDEEM ERROR:',
+                err
+            );
+
+            showModalError(
+                redeemError,
+                'Tidak dapat menghubungi server.'
+            );
+
+            redeemSubmit.disabled =
+                false;
+
+            redeemSubmit.innerHTML =
+                '<i class="fas fa-check"></i> Redeem';
+        }
+    }
+
+
+    redeemSubmit.addEventListener(
+        'click',
+        doRedeem
+    );
+
+
+    redeemCode.addEventListener(
+        'keydown',
+        function(e) {
+
+            if (
+                e.key === 'Enter'
+            ) {
+                doRedeem();
             }
+        }
+    );
 
-            // Event listener tombol tutorial
-            tutorialBtn.addEventListener('click', openTutorial);
+})();
 
-            // Close via tombol X
-            tutorialClose.addEventListener('click', closeTutorial);
 
-            // Close via tombol "Saya Sudah Paham"
-            tutorialCloseBtn.addEventListener('click', closeTutorial);
+/* ============================================================
+   TUTORIAL MODAL
+============================================================ */
 
-            // Close dengan klik di luar modal
-            tutorialModal.addEventListener('click', function(e) {
-                if (e.target === tutorialModal) closeTutorial();
-            });
+(function tutorialModal() {
 
-            // Close dengan tombol ESC
-            document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape' && tutorialModal.classList.contains('open')) closeTutorial();
-            });
+    const tutorialBtn =
+        document.getElementById(
+            'tutorialBtn'
+        );
 
-        })();
-        /* ============================================================ */
-    </script>
+    const tutorialModal =
+        document.getElementById(
+            'tutorialModal'
+        );
+
+    const tutorialClose =
+        document.getElementById(
+            'tutorialModalClose'
+        );
+
+    const tutorialCloseBtn =
+        document.getElementById(
+            'tutorialCloseBtn'
+        );
+
+    const videoEl =
+        document.getElementById(
+            'tutorialVideo'
+        );
+
+
+    function openTutorial() {
+
+        tutorialModal.classList.add(
+            'open'
+        );
+
+        document.body.style.overflow =
+            'hidden';
+
+        if (videoEl) {
+
+            videoEl.play()
+                .catch(
+                    function() {}
+                );
+        }
+    }
+
+
+    function closeTutorial() {
+
+        tutorialModal.classList.remove(
+            'open'
+        );
+
+        document.body.style.overflow =
+            '';
+
+        if (videoEl) {
+
+            videoEl.pause();
+
+            videoEl.currentTime =
+                0;
+        }
+    }
+
+
+    tutorialBtn.addEventListener(
+        'click',
+        openTutorial
+    );
+
+
+    tutorialClose.addEventListener(
+        'click',
+        closeTutorial
+    );
+
+
+    tutorialCloseBtn.addEventListener(
+        'click',
+        closeTutorial
+    );
+
+
+    tutorialModal.addEventListener(
+        'click',
+        function(e) {
+
+            if (
+                e.target ===
+                tutorialModal
+            ) {
+                closeTutorial();
+            }
+        }
+    );
+
+
+    document.addEventListener(
+        'keydown',
+        function(e) {
+
+            if (
+                e.key === 'Escape' &&
+                tutorialModal.classList.contains(
+                    'open'
+                )
+            ) {
+                closeTutorial();
+            }
+        }
+    );
+
+})();
+</script>
 
 </body>
 </html>
