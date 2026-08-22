@@ -1599,361 +1599,168 @@ async function syncServerLimit() {
 })();
 
 
-/* ============================================================
-   REACTION SUBMIT
-============================================================ */
+/* ── Submit handler ── */
+form.addEventListener('submit', async function(event) {
+    event.preventDefault();
 
-form.addEventListener(
-    'submit',
-    async function(event) {
+    if (button.disabled) return;
 
-        event.preventDefault();
+    const limitData = loadLimit();
 
-        if (button.disabled) {
-            return;
-        }
+    if (limitData.limit < LIMIT_COST) {
+        await syncServerLimit();
 
+        const fresh = loadLimit();
 
-        /* ----------------------------------------------------
-           CEK LIMIT LOKAL
-        ---------------------------------------------------- */
-
-        let limitData =
-            loadLimit();
-
-        if (
-            Number(limitData.limit) <
-            LIMIT_COST
-        ) {
-
-            await syncServerLimit();
-
-            limitData =
-                loadLimit();
-
-            if (
-                Number(limitData.limit) <
-                LIMIT_COST
-            ) {
-
-                showAlert(
-                    result,
-                    'error',
-                    'Limit harian kamu sudah habis.\nBalik lagi besok ya — limit direset otomatis setiap hari!'
-                );
-
-                updateLimitUI();
-
-                return;
-            }
-        }
-
-
-        /* ----------------------------------------------------
-           AMBIL INPUT
-        ---------------------------------------------------- */
-
-        const url =
-            document
-                .getElementById('url')
-                .value
-                .trim();
-
-        const rawEmoji =
-            reactionInput
-                .value
-                .trim();
-
-        const reaction =
-            normaliseEmojis(
-                rawEmoji
-            );
-
-
-        if (!url) {
-
+        if (fresh.limit < LIMIT_COST) {
             showAlert(
                 result,
                 'error',
-                'Link postingan wajib diisi.'
+                'Limit harian kamu sudah habis.\nBalik lagi besok ya — limit direset otomatis setiap hari!'
             );
 
+            updateLimitUI();
             return;
         }
+    }
 
+    const url = document.getElementById('url').value.trim();
+    const rawEmoji = reactionInput.value.trim();
+    const reaction = normaliseEmojis(rawEmoji);
 
-        if (!reaction) {
-
-            showAlert(
-                result,
-                'error',
-                'Ketik minimal satu emoji reaction.'
-            );
-
-            return;
-        }
-
-
-        const emojiCount =
-            reaction
-                .split(',')
-                .length;
-
-
-        /* ----------------------------------------------------
-           LOADING
-        ---------------------------------------------------- */
-
-        button.disabled = true;
-
-        button.dataset.loading =
-            '1';
-
-        button.classList.remove(
-            'no-limit'
-        );
-
-        button.innerHTML =
-            '<i class="fas fa-spinner fa-spin"></i> MEMPROSES...';
-
-
+    if (!url) {
         showAlert(
             result,
-            'info',
-            emojiCount > 1
-                ? 'Mengirim ' +
-                  emojiCount +
-                  ' reaction... harap tunggu.'
-                : 'Mengirim reaction...'
+            'error',
+            'Link postingan wajib diisi.'
         );
+        return;
+    }
 
+    if (!reaction) {
+        showAlert(
+            result,
+            'error',
+            'Ketik minimal satu emoji reaction.'
+        );
+        return;
+    }
 
-        /* ----------------------------------------------------
-           REQUEST
-        ---------------------------------------------------- */
+    const emojiCount = reaction
+        .split(',')
+        .filter(Boolean)
+        .length;
+
+    button.disabled = true;
+    button.dataset.loading = '1';
+    button.classList.remove('no-limit');
+
+    button.innerHTML =
+        '<i class="fas fa-spinner fa-spin"></i> MEMPROSES...';
+
+    showAlert(
+        result,
+        'info',
+        emojiCount > 1
+            ? 'Mengirim ' + emojiCount + ' reaction... harap tunggu.'
+            : 'Mengirim reaction...'
+    );
+
+    try {
+        const response = await fetch('/api/react', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+                url: url,
+                reaction: reaction
+            }),
+            cache: 'no-store'
+        });
+
+        /*
+         * PENTING:
+         * Jangan pakai response.text() langsung.
+         * API /api/react mengirim JSON.
+         */
+        let data = null;
+        let rawText = '';
 
         try {
+            rawText = await response.text();
 
-            const response =
-                await fetch(
-                    '/api/react',
-                    {
-                        method: 'POST',
-
-                        headers: {
-                            'Content-Type':
-                                'application/json',
-
-                            'Accept':
-                                'application/json'
-                        },
-
-                        credentials:
-                            'same-origin',
-
-                        body:
-                            JSON.stringify({
-                                url: url,
-                                reaction: reaction
-                            }),
-
-                        cache:
-                            'no-store'
-                    }
-                );
-
-
-            /*
-             * Jangan langsung response.text()
-             * lalu ditampilkan.
-             *
-             * API kamu mengembalikan:
-             *
-             * {
-             *   "ok": true,
-             *   "message": "..."
-             * }
-             *
-             * Jadi kita parse JSON terlebih dahulu.
-             */
-
-            const rawResponse =
-                await response.text();
-
-            let data = null;
-
-            try {
-
-                data =
-                    rawResponse
-                        ? JSON.parse(
-                            rawResponse
-                        )
-                        : null;
-
-            } catch (parseError) {
-
-                /*
-                 * Fallback kalau server
-                 * ternyata mengembalikan
-                 * plain text.
-                 */
-
-                data = null;
+            if (rawText) {
+                data = JSON.parse(rawText);
             }
+        } catch (parseError) {
+            data = null;
+        }
 
+        /*
+         * Ambil message dari JSON.
+         */
+        const message =
+            data && typeof data.message === 'string'
+                ? data.message
+                : rawText || 'Response server tidak valid.';
 
-            /* ------------------------------------------------
-               AMBIL MESSAGE SAJA
-            ------------------------------------------------ */
+        /*
+         * Sinkronkan limit dengan server.
+         *
+         * Jangan langsung mengurangi local limit sebelum tahu
+         * request benar-benar berhasil.
+         */
+        await syncServerLimit();
 
-            let message = '';
-
-            if (
-                data &&
-                typeof data === 'object'
-            ) {
-
-                message =
-                    data.message ||
-                    data.error ||
-                    (
-                        data.data &&
-                        data.data.message
-                    ) ||
-                    '';
-
-            }
-
-
-            /*
-             * Fallback plain text.
-             */
-
-            if (!message) {
-
-                message =
-                    rawResponse ||
-                    (
-                        response.ok
-                            ? 'Request berhasil diproses.'
-                            : 'Request gagal diproses.'
-                    );
-            }
-
-
-            /* ------------------------------------------------
-               SUCCESS
-            ------------------------------------------------ */
-
-            if (
-                response.ok &&
-                data?.ok !== false
-            ) {
-
-                /*
-                 * HANYA kurangi limit
-                 * jika server benar-benar
-                 * menganggap request berhasil.
-                 */
-
-                deductLimit();
-
-                showAlert(
-                    result,
-                    'success',
-                    message
-                );
-
-                button.innerHTML =
-                    '<i class="fas fa-check-circle"></i> BERHASIL';
-
-
-                /*
-                 * Sinkronkan lagi dengan
-                 * server supaya angka quota
-                 * frontend tidak melenceng.
-                 */
-
-                setTimeout(
-                    function() {
-                        syncServerLimit();
-                    },
-                    500
-                );
-
-            }
-
-
-            /* ------------------------------------------------
-               ERROR
-            ------------------------------------------------ */
-
-            else {
-
-                /*
-                 * Jangan deductLimit()
-                 * kalau request gagal.
-                 */
-
-                showAlert(
-                    result,
-                    data?.partial
-                        ? 'warning'
-                        : 'error',
-                    message
-                );
-
-                button.innerHTML =
-                    '<i class="fas fa-exclamation-circle"></i> GAGAL';
-
-
-                /*
-                 * Ambil quota asli dari server.
-                 */
-
-                setTimeout(
-                    function() {
-                        syncServerLimit();
-                    },
-                    300
-                );
-            }
-
-
-        } catch (error) {
-
-            console.error(
-                'REACTION REQUEST ERROR:',
-                error
-            );
+        if (response.ok && data?.ok === true) {
 
             showAlert(
                 result,
-                'error',
-                'Tidak dapat menghubungi server.\n\n' +
-                (
-                    error?.message ||
-                    'Request gagal.'
-                )
+                'success',
+                message
             );
 
             button.innerHTML =
-                '<i class="fas fa-exclamation-circle"></i> ERROR';
+                '<i class="fas fa-check-circle"></i> BERHASIL';
 
-        } finally {
+        } else {
 
-            delete button.dataset.loading;
-
-            setTimeout(
-                function() {
-                    updateLimitUI();
-                },
-                1800
+            showAlert(
+                result,
+                data?.partial ? 'warning' : 'error',
+                message
             );
+
+            button.innerHTML =
+                '<i class="fas fa-exclamation-circle"></i> GAGAL';
         }
+
+    } catch (error) {
+
+        console.error('REACTION REQUEST ERROR:', error);
+
+        showAlert(
+            result,
+            'error',
+            'Tidak dapat menghubungi server.\n\n' +
+            (error?.message || 'Request gagal.')
+        );
+
+        button.innerHTML =
+            '<i class="fas fa-exclamation-circle"></i> ERROR';
+
+    } finally {
+
+        delete button.dataset.loading;
+
+        setTimeout(function() {
+            updateLimitUI();
+        }, 1800);
     }
-);
+});
 
 
 /* ============================================================
